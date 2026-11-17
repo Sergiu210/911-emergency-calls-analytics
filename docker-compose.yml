@@ -1,0 +1,57 @@
+services:
+  db:
+    image: postgres:18
+    container_name: emergency_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: 2703
+      POSTGRES_DB: emergency_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d emergency_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  etl:
+    build: .
+    container_name: emergency_etl
+    command: python convert.py
+    environment:
+      DATABASE_URL: postgresql://postgres:2703@db:5432/emergency_db
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  backend:
+    build: .
+    container_name: emergency_backend
+    command: uvicorn main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:2703@db:5432/emergency_db
+    depends_on:
+      etl:
+        condition: service_completed_successfully
+
+  frontend:
+    build: .
+    container_name: emergency_frontend
+    command: streamlit run app_dashboard.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      API_BASE_URL: http://backend:8000/api/v1
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
